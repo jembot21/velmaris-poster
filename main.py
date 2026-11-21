@@ -38,10 +38,11 @@ def ramp(stops, y):
     return stops[-1][1]
 
 
-sky_stops = [(0, (18, 47, 63)), (175, (35, 68, 80)), (310, (113, 86, 103)),
-             (430, (194, 117, 106)), (530, (245, 177, 105)), (570, (245, 193, 126))]
-water_stops = [(540, (93, 125, 125)), (625, (43, 95, 108)),
-               (820, (24, 68, 82)), (1024, (17, 46, 59))]
+sky_stops = [(0, (17, 39, 59)), (170, (38, 65, 83)), (275, (85, 83, 107)),
+             (365, (153, 100, 117)), (445, (218, 132, 116)),
+             (510, (247, 181, 123)), (551, (247, 205, 151))]
+water_stops = [(540, (119, 143, 139)), (591, (57, 105, 117)),
+               (690, (29, 76, 94)), (820, (20, 56, 76)), (1024, (16, 43, 60))]
 canvas = Image.new("RGB", (SIZE, SIZE))
 px = canvas.load()
 for y in range(SIZE):
@@ -49,8 +50,14 @@ for y in range(SIZE):
         if y < 551:
             color = ramp(sky_stops, y)
             radius = ((x - 653) / 295) ** 2 + ((y - 501) / 174) ** 2
-            corona = math.exp(-radius * .78) * .36 + math.exp(-radius * 2.9) * .22
-            color = blend(color, (255, 197, 128), corona)
+            corona = math.exp(-radius * .55) * .28 + math.exp(-radius * 3.2) * .36
+            color = blend(color, (255, 203, 136), corona)
+            # Slow pigment tides and suspended vapour, not visible gradient steps.
+            vapour = (math.sin(x*.013 + y*.031) +
+                      .45*math.sin(x*.037 - y*.017) + math.sin(y*.071)) / 2.45
+            color = blend(color, (117, 107, 134), max(0, vapour)*.055)
+            haze = math.exp(-((y - 532)/27)**2)
+            color = blend(color, (255, 216, 168), haze*.21)
         else:
             color = ramp(water_stops, y)
             mottling = (math.sin(x * .012 + math.sin(y * .009) * 1.2) *
@@ -94,25 +101,55 @@ def bezier(a, b, c, d, count=120):
     return points
 
 
-# Soft, broken streaks of cloud settle between the rose band and the horizon.
+# Wind-shaped cloud banks: soft bodies with broken, sunlit lower hems.
+# Each bank has its own silhouette and optical depth; the title has open sky.
+weather_rng = random.Random(48217)
 cloud = Image.new("RGBA", im.size, (0, 0, 0, 0))
 cd = ImageDraw.Draw(cloud)
-for x, y, rx in [(116, 350, 130), (411, 391, 171), (864, 338, 149), (912, 438, 95)]:
-    cd.ellipse(((x-rx)*SCALE, (y-3)*SCALE, (x+rx)*SCALE, (y+4)*SCALE), fill=(243, 166, 145, 29))
-cloud = cloud.filter(ImageFilter.GaussianBlur(7 * SCALE))
+cloud_banks = [(-90, 254, 420, 24, (38, 61, 79), 88),
+               (736, 234, 390, 27, (43, 62, 83), 96),
+               (23, 321, 455, 24, (76, 75, 99), 112),
+               (753, 362, 399, 21, (100, 76, 98), 116),
+               (-114, 411, 480, 17, (119, 83, 103), 112),
+               (347, 438, 221, 10, (151, 97, 110), 85),
+               (813, 472, 316, 12, (157, 105, 115), 93)]
+for left, y, width, height, tint, opacity in cloud_banks:
+    ridge, hem = [], []
+    for i in range(39):
+        t = i/38
+        envelope = math.sin(math.pi*t)**.7
+        wave = math.sin(t*23+left)*.24 + math.sin(t*53)*.11
+        ridge.append(((left+t*width)*SCALE,
+                      (y-height*envelope*(.76+wave))*SCALE))
+        hem.append(((left+t*width)*SCALE,
+                    (y+height*envelope*(.19+.09*math.sin(t*29)))*SCALE))
+    cd.polygon(ridge+hem[::-1], fill=(*tint, opacity))
+    # Gold lies only on the scalloped underside facing the low sun.
+    for i in range(5, 34):
+        if weather_rng.random() < .73:
+            cd.line([hem[i], hem[i+1]], fill=(255, 180, 139, int(opacity*.62)),
+                    width=max(1, round(1.1*SCALE)))
+cloud = cloud.filter(ImageFilter.GaussianBlur(2.8*SCALE))
 im = Image.alpha_composite(im.convert("RGBA"), cloud).convert("RGB")
+# Thin veils drift across the glow, at a softer scale than the cloud banks.
+veil = Image.new("RGBA", im.size, (0, 0, 0, 0))
+vd = ImageDraw.Draw(veil)
+for _ in range(75):
+    x, y = weather_rng.uniform(-150, 1050), weather_rng.uniform(300, 530)
+    width = weather_rng.uniform(35, 185)
+    vd.ellipse((x*SCALE, y*SCALE, (x+width)*SCALE,
+                (y+weather_rng.uniform(1, 4))*SCALE), fill=(255, 198, 163, 17))
+veil = veil.filter(ImageFilter.GaussianBlur(3.5*SCALE))
+im = Image.alpha_composite(im.convert("RGBA"), veil).convert("RGB")
 draw = ImageDraw.Draw(im)
-for _ in range(145):
-    x, y = randomizer.uniform(-120, 1050), randomizer.uniform(266, 488)
-    color = blend(ramp(sky_stops, y), (243, 175, 145), randomizer.uniform(.08, .2))
-    stroke([(x, y), (x + randomizer.uniform(30, 175), y - randomizer.uniform(0, 3))], color,
-           randomizer.uniform(.45, 1.1))
 
 # The setting sun and low distant headlands define the horizon.
 sun_glow = Image.new("RGBA", im.size, (0, 0, 0, 0))
 sg = ImageDraw.Draw(sun_glow)
-sg.ellipse((548*SCALE, 399*SCALE, 758*SCALE, 603*SCALE), fill=(255, 176, 103, 27))
-sg.ellipse((577*SCALE, 427*SCALE, 730*SCALE, 577*SCALE), fill=(255, 196, 116, 49))
+for radius, alpha in [(172, 12), (121, 20), (82, 37), (55, 57)]:
+    sg.ellipse(((654-radius)*SCALE, (499-radius*.82)*SCALE,
+                (654+radius)*SCALE, (499+radius*.82)*SCALE),
+               fill=(255, 199, 126, alpha))
 sun_glow = sun_glow.filter(ImageFilter.GaussianBlur(31*SCALE))
 im = Image.alpha_composite(im.convert("RGBA"), sun_glow).convert("RGB")
 draw = ImageDraw.Draw(im)
@@ -144,6 +181,27 @@ for _ in range(6400):
     c = blend(ramp(water_stops, y), (255, 235, 177), .43 + concentration * randomizer.uniform(.22, .48))
     length = randomizer.uniform(1.2, 5.5) * (1 + depth * 1.15)
     stroke([(x, y), (x + length, y)], c, randomizer.choice([.5, .65, .8]))
+
+# Long swell fronts sit beneath the small etched ripples. Broken bright crests
+# widen with perspective and leave deep indigo troughs between them.
+sea_rng = random.Random(5916)
+for row in range(32):
+    y = 555 + (row/31)**1.65*185
+    depth = (y-550)/195
+    for left in range(-25, 1050, 105):
+        x = left + sea_rng.uniform(-28, 24)
+        length = sea_rng.uniform(32, 92)*(0.5+depth*.7)
+        curve = [(x+t*length, y+math.sin(t*math.pi)*(.3+depth*1.2))
+                 for t in [i/12 for i in range(13)]]
+        stroke(curve, blend(ramp(water_stops, y), (149, 164, 150), .16), .65)
+        if abs(x-654) < 26+depth*74:
+            stroke(curve[:8], (233, 186, 123), .8)
+for _ in range(280):
+    y = sea_rng.uniform(553, 731)
+    spread = 3+(y-550)*.14
+    x = sea_rng.gauss(654, spread)
+    stroke([(x, y), (x+sea_rng.uniform(2, 10), y)],
+           sea_rng.choice([(255, 223, 159), (248, 199, 128), (255, 235, 181)]), .7)
 
 # A quiet amber ladder catches the keeper's lamp close to the island.
 lamp_reflection = Image.new("RGBA", im.size, (0, 0, 0, 0))
@@ -204,9 +262,12 @@ for x, y, rx, ry, tint, alpha in [
         (190, 948, 123, 17, (220, 157, 132), 31),
         (553, 975, 97, 12, (229, 174, 133), 30),
         (946, 948, 107, 15, (200, 142, 128), 34)]:
-    pd.ellipse(((x-rx)*SCALE, (y-ry)*SCALE, (x+rx)*SCALE, (y+ry)*SCALE), fill=(40, 66, 69, 37))
-    pd.ellipse(((x-rx+2)*SCALE, (y-ry+2)*SCALE, (x+rx-2)*SCALE, (y+ry-2)*SCALE),
-               fill=(*tint, alpha))
+    # Long irregular tidal pools reflect the sky, with a cool recessed bank.
+    outline = [(x-rx, y), (x-rx*.62, y-ry*.66), (x-rx*.14, y-ry),
+               (x+rx*.43, y-ry*.48), (x+rx, y-ry*.14),
+               (x+rx*.71, y+ry*.51), (x+rx*.12, y+ry), (x-rx*.67, y+ry*.43)]
+    pd.polygon([(a*SCALE, b*SCALE) for a,b in outline], fill=(32, 66, 77, 100))
+    pd.polygon([(a*SCALE, (b+1.2)*SCALE) for a,b in outline], fill=(*tint, alpha+32))
     pd.line(((x-rx*.55)*SCALE, (y-ry*.12)*SCALE, (x+rx*.42)*SCALE, (y-ry*.12)*SCALE),
             fill=(255, 213, 169, alpha+9), width=max(1, round(.7*SCALE)))
 pools = pools.filter(ImageFilter.GaussianBlur(2.2 * SCALE))
@@ -231,16 +292,35 @@ mud_texture = mud_texture.filter(ImageFilter.GaussianBlur(4.5 * SCALE))
 im = Image.alpha_composite(im.convert("RGBA"), mud_texture).convert("RGB")
 draw = ImageDraw.Draw(im)
 
-# Fine etched marks in the exposed mudflats and broken lighthouse reflection.
-for _ in range(7800):
-    y, x = randomizer.uniform(740, 1024), randomizer.uniform(0, 1024)
-    c = randomizer.choice([(176, 148, 113), (125, 124, 108), (192, 157, 117), (103, 119, 111)])
-    stroke([(x, y), (x + randomizer.uniform(2, 20), y - randomizer.uniform(0, .5))], c, .45)
-for _ in range(150):
+# Tidal runnels: dark recessed cuts paired with a slim reflected-sky lip.
+# Marks gather in horizontal seams rather than covering every surface in noise.
+for _ in range(2100):
+    y, x = randomizer.uniform(752, 1024), randomizer.uniform(0, 1024)
+    depth = (y-740)/284
+    seam = math.sin(y*.069 + math.sin(x*.009)*2.1)
+    if seam < .2:
+        continue
+    length = randomizer.uniform(3, 22)*(0.6+depth)
+    c = blend((70, 101, 107), (194, 163, 139), randomizer.random()*.65)
+    stroke([(x, y), (x+length, y-.3)], c, .5)
+    if seam > .92:
+        stroke([(x+2, y-1), (x+length*.8, y-1.3)], (205, 174, 144), .55)
+for _ in range(190):
     y = randomizer.uniform(718, 984)
-    x = randomizer.gauss(657, 8 + (y - 718) * .13)
-    stroke([(x, y), (x + randomizer.uniform(2, 14), y)],
-           randomizer.choice([(210, 165, 103), (185, 148, 101), (224, 176, 106)]), .55)
+    x = randomizer.gauss(657, 8+(y-718)*.15)
+    stroke([(x, y), (x+randomizer.uniform(2, 17), y)],
+           randomizer.choice([(219, 176, 119), (192, 154, 113), (236, 194, 137)]), .65)
+
+# Suspended sea mist reveals a broad, feathered lantern wash toward the tide.
+spill = Image.new("RGBA", im.size, (0, 0, 0, 0))
+spd = ImageDraw.Draw(spill)
+spd.polygon([(650*SCALE, 317*SCALE), (750*SCALE, 693*SCALE),
+             (593*SCALE, 723*SCALE)], fill=(255, 192, 108, 12))
+spd.ellipse((588*SCALE, 654*SCALE, 760*SCALE, 754*SCALE),
+            fill=(255, 190, 105, 23))
+spill = spill.filter(ImageFilter.GaussianBlur(24*SCALE))
+im = Image.alpha_composite(im.convert("RGBA"), spill).convert("RGB")
+draw = ImageDraw.Draw(im)
 
 # The rocky tidal island has sunward ochre faces and cool cut-shadow planes.
 polygon([(505, 682), (533, 632), (565, 607), (605, 596), (651, 601), (698, 588),
@@ -259,17 +339,31 @@ polygon([(516, 679), (546, 644), (568, 651), (550, 692)], (79, 91, 80))
 # A warm spill from the lantern washes the island's near face and cottage wall.
 rock_light = Image.new("RGBA", im.size, (0, 0, 0, 0))
 rld = ImageDraw.Draw(rock_light)
-rld.ellipse((652*SCALE, 610*SCALE, 799*SCALE, 724*SCALE), fill=(255, 174, 79, 53))
+rld.polygon([(636*SCALE, 605*SCALE), (694*SCALE, 595*SCALE),
+             (770*SCALE, 678*SCALE), (698*SCALE, 703*SCALE),
+             (608*SCALE, 667*SCALE)], fill=(255, 186, 103, 45))
+rld.ellipse((613*SCALE, 600*SCALE, 713*SCALE, 659*SCALE), fill=(255, 212, 139, 52))
 rock_light = rock_light.filter(ImageFilter.GaussianBlur(18*SCALE))
 im = Image.alpha_composite(im.convert("RGBA"), rock_light).convert("RGB")
 draw = ImageDraw.Draw(im)
-for _ in range(560):
-    x, y = randomizer.uniform(543, 760), randomizer.uniform(637, 699)
-    if x < 735 - max(0, y - 648) * .35:
-        c = randomizer.choice([(49, 68, 67), (58, 78, 74), (93, 99, 80), (111, 111, 89),
-                               (148, 127, 96), (162, 136, 101), (183, 152, 111), (207, 169, 118)])
-        stroke([(x, y), (x + randomizer.uniform(2, 18), y - randomizer.uniform(.3, 4))], c,
-               randomizer.choice([.55, .8, 1.1]))
+# Angular fractures give the rock shelf coherent lit caps and deep clefts.
+for points, tint in [
+    ([(521,677),(544,644),(557,650),(546,677)], (165,137,98)),
+    ([(546,677),(557,650),(574,666),(559,694)], (61,79,75)),
+    ([(562,638),(583,621),(605,624),(588,645)], (204,163,111)),
+    ([(588,645),(605,624),(601,652),(580,667)], (101,103,83)),
+    ([(602,662),(629,642),(654,646),(633,667)], (165,139,98)),
+    ([(633,667),(654,646),(648,683),(619,698)], (56,77,72)),
+    ([(662,650),(688,628),(708,637),(688,657)], (186,150,101)),
+    ([(688,657),(708,637),(720,663),(700,682)], (81,90,75)),
+    ([(710,677),(730,656),(752,672),(739,688)], (151,125,88)),
+    ([(739,688),(752,672),(778,689),(745,703)], (59,77,70)),
+    ([(569,684),(590,675),(609,687),(590,703)], (121,115,88))]:
+    polygon(points, tint)
+    stroke(points[:2], blend(tint, (249,197,128), .35), .8)
+for a,b in [((551,696),(578,670)), ((600,653),(590,674)),
+            ((648,684),(664,660)), ((710,643),(729,661)), ((731,702),(709,690))]:
+    stroke([a,b], (38,61,61), 1.4)
 
 # A curved, tapering stone causeway approaches from the lower-left foreground.
 inner = bezier((-72, 1048), (42, 823), (414, 865), (606, 687))
@@ -279,14 +373,23 @@ polygon(inner + outer[::-1], (43, 59, 58))
 polygon(road_edge + outer[::-1], (159, 139, 108))
 stroke(road_edge, (221, 181, 125), 2.6)
 stroke(outer, (68, 79, 73), 3.5)
-for i in range(3, 117, 3):
+# Every sett has a top plane, a dark joint and a sunward bevel.
+stone_rng = random.Random(7318)
+for i in range(1, 118, 3):
     a, b = road_edge[i], outer[i]
-    stroke([a, b], (101, 101, 86), .8)
-    an, bn = road_edge[min(i + 3, 120)], outer[min(i + 3, 120)]
-    for f in (.3, .62, .83):
-        t = f + (.035 if i % 2 else -.035)
-        stroke([(a[0]*(1-t)+b[0]*t, a[1]*(1-t)+b[1]*t),
-                (an[0]*(1-t)+bn[0]*t, an[1]*(1-t)+bn[1]*t)], (116, 112, 92), .65)
+    an, bn = road_edge[min(i+3,120)], outer[min(i+3,120)]
+    boundaries = [0, .23, .51, .77, 1] if i % 2 else [0, .16, .42, .7, 1]
+    for low, high in zip(boundaries, boundaries[1:]):
+        def across(c,d,t):
+            return (c[0]*(1-t)+d[0]*t, c[1]*(1-t)+d[1]*t)
+        q = [across(a,b,low+.008), across(a,b,high-.008),
+             across(an,bn,high-.008), across(an,bn,low+.008)]
+        tint = blend((121,119,101), (205,172,125), stone_rng.uniform(.15,.83))
+        polygon(q, tint)
+        stroke(q[:2], (82,91,83), .7)
+        stroke([q[3],q[0]], blend(tint,(255,213,148),.48), .85)
+        if i < 65:
+            stroke([q[2],q[3]], blend(tint,(48,68,66),.42), .7)
 
 # Keeper's cottage, pitched tile roof, chimney, door and amber-lit windows.
 polygon([(684, 581), (745, 583), (745, 625), (684, 619)], (211, 174, 119))
@@ -308,6 +411,11 @@ for x, y in [(696, 595), (723, 598)]:
     stroke([(x+4, y), (x+4, y+11)], (138, 105, 68), .8)
 polygon([(751, 591), (758, 588), (758, 604), (751, 606)], (244, 179, 89))
 
+# The cottage's eaves and sun-facing corner catch a narrow, warm bounce.
+stroke([(684, 589), (684, 617), (743, 624)], (247, 196, 129), 1.2)
+stroke([(679, 582), (709, 555), (745, 564)], (246, 173, 103), 1.2)
+stroke([(750, 552), (750, 567)], (233, 174, 108), .85)
+
 # Tall tapered lighthouse in alternating red and ivory masonry courses.
 top, foot = 333, 616
 for y in range(top, foot):
@@ -320,16 +428,30 @@ for y in range(top, foot):
         dark, bright = ((102, 49, 46), (204, 95, 62)) if red_band else ((126, 130, 115), (248, 219, 166))
         color = blend(dark, bright, light)
         stroke([(654 + offset, y), (655 + offset, y)], color, 1)
+# Narrow rims preserve the masonry's volume and alternating courses.
+for y in range(top+9, foot-2):
+    t = (y-top)/(foot-top)
+    half = 17+14*t
+    red_band = int((y-333)/48) % 2 == 1
+    stroke([(654-half+1, y), (654-half+2.2, y)],
+           (241, 151, 91) if red_band else (255, 231, 173), .85)
+    if y < 378:
+        strength = (378-y)/45
+        stroke([(653+half-1, y), (654+half-1, y)],
+               blend((137, 131, 107), (255, 201, 119), strength*.8), .8)
 stroke([(624, 614), (684, 614)], (49, 70, 67), 3)
 for y in (379, 475, 570):
     polygon([(648, y), (655, y-1), (655, y+13), (648, y+14)], (45, 68, 69))
     stroke([(647, y+15), (657, y+14)], (226, 194, 146), .8)
 
-# Lantern light falls softly across the rock below, behind the tower and cottage.
+# Nested optical scales: amber air, luminous glass, then a nearly white flame.
 halo = Image.new("RGBA", im.size, (0, 0, 0, 0))
 hd = ImageDraw.Draw(halo)
-hd.ellipse((625*SCALE, 302*SCALE, 686*SCALE, 380*SCALE), fill=(255, 175, 73, 34))
-halo = halo.filter(ImageFilter.GaussianBlur(16 * SCALE))
+for radius, alpha in [(106, 4), (79, 8), (54, 15), (34, 31), (19, 60)]:
+    hd.ellipse(((654-radius)*SCALE, (316-radius*.84)*SCALE,
+                (654+radius)*SCALE, (316+radius*.84)*SCALE),
+               fill=(255, 192, 105, alpha))
+halo = halo.filter(ImageFilter.GaussianBlur(11*SCALE))
 im = Image.alpha_composite(im.convert("RGBA"), halo).convert("RGB")
 draw = ImageDraw.Draw(im)
 polygon([(630, 333), (678, 333), (684, 343), (625, 343)], (48, 71, 68))
@@ -337,7 +459,9 @@ polygon([(635, 299), (674, 299), (674, 332), (635, 332)], (243, 183, 87))
 for x in range(636, 674):
     color = blend((255, 222, 135), (214, 133, 65), abs(x - 652) / 24)
     stroke([(x, 302), (x, 329)], color, 1)
-oval((645, 306, 664, 326), (255, 241, 177))
+oval((644, 305, 665, 327), (255, 233, 154))
+oval((649, 308, 660, 324), (255, 250, 212))
+stroke([(638, 315), (671, 315)], (255, 237, 174), 1.1)
 for x in (635, 645, 664, 674):
     stroke([(x, 299), (x, 333)], (46, 67, 66), 1.8)
 polygon([(627, 300), (654, 274), (682, 300)], (43, 66, 65))
@@ -349,13 +473,32 @@ stroke([(624, 341), (624, 323), (684, 323), (684, 341)], (40, 63, 62), 1)
 for x in range(626, 685, 8):
     stroke([(x, 324), (x, 340)], (49, 68, 64), .8)
 
+# Small hot edges link the lantern to the cottage and sun-facing rock crown.
+stroke([(630, 298), (653, 278)], (200, 157, 98), 1)
+stroke([(630, 332), (676, 332)], (255, 209, 129), 1.1)
+stroke([(574, 610), (620, 599), (649, 607)], (219, 171, 108), 1.3)
+stroke([(681, 605), (709, 590), (735, 615)], (232, 178, 109), 1.2)
+
 # A stranded rowing skiff with a dark underside, plank highlights and oars.
-oval((714, 945, 900, 961), (68, 84, 79))
+# A quiet reflected silhouette grounds the hull in the wet silt.
+boat_shadow = Image.new("RGBA", im.size, (0,0,0,0))
+bsd = ImageDraw.Draw(boat_shadow)
+bsd.ellipse((715*SCALE, 941*SCALE, 902*SCALE, 966*SCALE), fill=(26,58,65,110))
+bsd.polygon([(741*SCALE,957*SCALE),(866*SCALE,973*SCALE),
+             (891*SCALE,966*SCALE),(760*SCALE,948*SCALE)], fill=(194,133,91,35))
+boat_shadow = boat_shadow.filter(ImageFilter.GaussianBlur(3*SCALE))
+im = Image.alpha_composite(im.convert("RGBA"), boat_shadow).convert("RGB")
+draw = ImageDraw.Draw(im)
 polygon([(718, 916), (758, 900), (859, 918), (895, 934), (867, 951), (756, 937)], (58, 61, 55))
 polygon([(725, 916), (760, 907), (855, 923), (885, 934), (862, 941), (758, 929)], (181, 113, 66))
 polygon([(738, 917), (764, 912), (850, 927), (870, 934), (859, 936), (763, 925)], (40, 59, 56))
 polygon([(727, 920), (759, 934), (869, 948), (888, 936), (865, 954), (756, 940)], (105, 72, 52))
 stroke([(728, 917), (760, 932), (866, 947), (886, 936)], (224, 159, 89), 1.6)
+# Curving strakes give the outside its volume; the upper rail holds the light.
+stroke([(734,925),(759,936),(865,951),(882,941)], (66,64,54), .9)
+stroke([(742,926),(761,932),(865,945)], (184,120,73), .9)
+stroke([(719,916),(758,901),(858,918),(893,933)], (246,190,119), 1.9)
+stroke([(760,904),(853,921)], (218,155,94), .8)
 for x, y in [(773, 920), (811, 926), (843, 930)]:
     stroke([(x-3, y+5), (x+5, y-4)], (174, 124, 76), 3)
 stroke([(781, 900), (849, 959)], (59, 62, 53), 2.5)
@@ -365,39 +508,70 @@ stroke([(780, 899), (850, 957)], (207, 157, 94), .9)
 for x, y, size in [(155, 323, 12), (201, 354, 8), (842, 369, 12), (872, 396, 7), (792, 408, 6)]:
     stroke([(x-size, y-3), (x-size*.48, y-4), (x, y), (x+size*.45, y-6), (x+size, y-7)], (38, 60, 65), 1.25)
 
-# Only lettering: individually tracked serif capitals, centered in the upper sky.
-font = ImageFont.truetype(str(ROOT / "fonts" / "LiberationSerif-Bold.ttf"), 108 * SCALE)
+# Only lettering: the original tracked serif, printed into the evening palette.
+font = ImageFont.truetype(str(ROOT / "fonts" / "LiberationSerif-Bold.ttf"), 108*SCALE)
 letters = "VELMARIS"
-tracking = 11 * SCALE
+tracking = 11*SCALE
 advances = [draw.textlength(char, font=font) for char in letters]
-start = (SIZE*SCALE - sum(advances) - tracking*(len(letters)-1)) / 2
-shadow = Image.new("RGBA", im.size, (0, 0, 0, 0))
-sd = ImageDraw.Draw(shadow)
+start = (SIZE*SCALE-sum(advances)-tracking*(len(letters)-1))/2
+letter_mask = Image.new("L", im.size, 0)
+lmd = ImageDraw.Draw(letter_mask)
 x = start
 for char, advance in zip(letters, advances):
-    sd.text((round(x + SCALE), 91*SCALE + 2*SCALE), char, font=font, fill=(20, 43, 49, 135))
-    x += advance + tracking
-shadow = shadow.filter(ImageFilter.GaussianBlur(1.1*SCALE))
-im = Image.alpha_composite(im.convert("RGBA"), shadow).convert("RGB")
+    lmd.text((round(x), 91*SCALE), char, font=font, fill=255)
+    x += advance+tracking
+# The depression is softer and smaller than a floating drop shadow.
+shadow = Image.new("RGBA", im.size, (0,0,0,0))
+shadow_alpha = letter_mask.point(lambda v: round(v*.53))
+shadow.putalpha(shadow_alpha)
+shifted_shadow = Image.new("RGBA", im.size, (0,0,0,0))
+shifted_shadow.paste(shadow, (0, round(1.15*SCALE)))
+shifted_shadow = shifted_shadow.filter(ImageFilter.GaussianBlur(.85*SCALE))
+im = Image.alpha_composite(im.convert("RGBA"), shifted_shadow).convert("RGB")
+# A hairline of compressed, lighter paper at the upper edge of the impression.
+emboss_mask = Image.new("L", im.size, 0)
+emboss_mask.paste(letter_mask, (0, -1))
+im.paste((211, 184, 144), (0,0,im.width,im.height), emboss_mask)
+ink = Image.new("RGB", im.size, (242, 216, 170))
+ipx, mpx = ink.load(), letter_mask.load()
+ink_rng = random.Random(19914)
+box = letter_mask.getbbox()
+for yy in range(box[1],box[3]):
+    for xx in range(box[0],box[2]):
+        if mpx[xx,yy]:
+            pressure = math.sin(xx*.015+yy*.019)*1.6
+            fibre = ink_rng.gauss(0, 1.6)
+            dry = ink_rng.random() < .015
+            variation = pressure+fibre-(10 if dry else 0)
+            ipx[xx,yy] = tuple(round(c+variation) for c in (244,218,172))
+im.paste(ink, (0,0), letter_mask)
 draw = ImageDraw.Draw(im)
-x = start
-for char, advance in zip(letters, advances):
-    draw.text((round(x), 91*SCALE), char, font=font, fill=(249, 226, 181))
-    x += advance + tracking
 
-# Aged print finish: restrained vignette, paper flecks and deterministic grain.
+# Printed stock has fibres at two scales, with quiet ink stipple rather than
+# a visible dot grid. Warm paper binds the copper sky and the blue tidal water.
 im = im.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+paper_rng = random.Random(62840)
+stock = Image.new("L", (256,256))
+stock.putdata([max(0,min(255,round(paper_rng.gauss(128,13))))
+               for _ in range(256*256)])
+stock = stock.resize((SIZE,SIZE), Image.Resampling.BICUBIC)
+stock = stock.filter(ImageFilter.GaussianBlur(.5))
+stock_px = stock.load()
 pixels = im.load()
 for y in range(SIZE):
     for x in range(SIZE):
-        r, g, b = pixels[x, y]
-        edge = ((x - 511.5) / 724) ** 2 + ((y - 511.5) / 724) ** 2
-        shade = 1 - .13 * edge
-        gx, gy = x % 7 - 3, y % 7 - 3
-        halftone = -1.15 if gx*gx + gy*gy <= 2 and (x // 7 + y // 7) % 2 == 0 else 0
-        noise = randomizer.gauss(0, 1.75) + (.35 if (x + y * 3) % 11 == 0 else 0) + halftone
-        pixels[x, y] = tuple(max(0, min(255, round(channel * shade + noise)))
-                             for channel in (r + 2, g + 1, b))
+        r,g,b = pixels[x,y]
+        radial = ((x-511.5)/650)**2 + ((y-490)/755)**2
+        # The falloff lives at the corners, leaving the lantern and title clear.
+        vignette = max(0, (radial-.17)/1.35)**1.65
+        shade = 1-.115*vignette
+        tooth = (stock_px[x,y]-128)*.15
+        fibre = randomizer.gauss(0,1.35)
+        stipple = -2.4 if randomizer.random() < .08 else .2
+        noise = tooth+fibre+stipple
+        # Denser stock detail remains low-contrast enough for the image to breathe.
+        pixels[x,y] = tuple(max(0,min(255,round(channel*shade+noise)))
+                            for channel in (r+1.8,g+1.1,b+.35))
 
 output = Path(os.environ.get("VELMARIS_OUTPUT", "/output/entry.png"))
 output.parent.mkdir(parents=True, exist_ok=True)
